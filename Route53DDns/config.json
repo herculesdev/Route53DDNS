@@ -1,0 +1,20 @@
+﻿{
+  "accessKey": "your_aws_access_key",
+  "secretKey": "your_aws_secret_key",
+  "targetHostedZone": "yourhostedzone.com",
+  "targetRecords": [
+    {
+      "name": "yourdomain.com",
+      "type": "A"
+    },
+    {
+      "name": "www.yourdomain.com",
+      "type": "A"
+    },
+    {
+      "name": "*.yourdomain.com",
+      "type": "A"
+    }
+  ],
+  "Interval": 60
+}

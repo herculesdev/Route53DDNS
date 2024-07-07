@@ -1,0 +1,8 @@
+C:\Users\hercu\RiderProjects\Route53DDns\Route53DDns\bin\Release\net8.0\publish\Route53DDns.exe
+C:\Users\hercu\RiderProjects\Route53DDns\Route53DDns\bin\Release\net8.0\publish\config.json
+C:\Users\hercu\RiderProjects\Route53DDns\Route53DDns\bin\Release\net8.0\publish\Route53DDns.dll
+C:\Users\hercu\RiderProjects\Route53DDns\Route53DDns\bin\Release\net8.0\publish\Route53DDns.deps.json
+C:\Users\hercu\RiderProjects\Route53DDns\Route53DDns\bin\Release\net8.0\publish\Route53DDns.runtimeconfig.json
+C:\Users\hercu\RiderProjects\Route53DDns\Route53DDns\bin\Release\net8.0\publish\Route53DDns.pdb
+C:\Users\hercu\RiderProjects\Route53DDns\Route53DDns\bin\Release\net8.0\publish\AWSSDK.Core.dll
+C:\Users\hercu\RiderProjects\Route53DDns\Route53DDns\bin\Release\net8.0\publish\AWSSDK.Route53.dll

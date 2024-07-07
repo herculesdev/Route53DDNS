@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "kAxA0bqXylVcCC0WlkggTK1agG90P27cbjG3ZjT5bqq9FOdqrEDqygNZjFlhExyi4RpveKCeZI6munYu/wWwAA==",
+  "success": true,
+  "projectFilePath": "C:\\Users\\hercu\\RiderProjects\\Route53DDns\\Route53DDns\\Route53DDns.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\hercu\\.nuget\\packages\\awssdk.core\\3.7.304.25\\awssdk.core.3.7.304.25.nupkg.sha512",
+    "C:\\Users\\hercu\\.nuget\\packages\\awssdk.route53\\3.7.302.81\\awssdk.route53.3.7.302.81.nupkg.sha512"
+  ],
+  "logs": []
+}
