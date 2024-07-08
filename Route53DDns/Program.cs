@@ -1,7 +1,11 @@
 ﻿// See https://aka.ms/new-console-template for more information
-
-using System.Net;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Amazon;
 using Amazon.Route53;
 using Amazon.Route53.Model;
@@ -53,31 +57,45 @@ foreach (var awsHostedZoneRecord in awsRecordResponse.ResourceRecordSets)
     else
     {
         var awsHostedZoneRecordValue = awsHostedZoneRecord.ResourceRecords.FirstOrDefault();
-        Console.WriteLine($"{awsHostedZoneRecord.Type,5} | {awsHostedZoneRecord.Name.PadRight(maxNameLength, ' ')} -> {awsHostedZoneRecordValue.Value}");
+        Console.WriteLine($"{awsHostedZoneRecord.Type,5} | {awsHostedZoneRecord.Name.PadRight(maxNameLength, ' ')} -> {awsHostedZoneRecordValue?.Value}");
     }
 
 }
 
-Console.Write("Retrieving external IP...");
-var externalIp = await GetExternalIp();
-Console.WriteLine($"[{externalIp}] OK!");
+var lastExternalIp = "";
 
 while (true)
 {
-    Console.Write("Sending change request to AWS Route 53...");
-    var changes = new List<Change>();
-    foreach (var configTargetRecord in config.TargetRecords)
+    try
     {
-        var recordSet = new ResourceRecordSet(configTargetRecord.Name, configTargetRecord.Type);
-        recordSet.ResourceRecords.Add(new ResourceRecord(externalIp));
-        recordSet.TTL = 60;
-        changes.Add(new Change(ChangeAction.UPSERT, recordSet));
+        Console.Write("Retrieving external IP...");
+        var externalIp = await GetExternalIp();
+        Console.WriteLine($"[{externalIp}] OK!");
+
+        if (externalIp != lastExternalIp)
+        {
+
+            Console.Write("Sending change request to AWS Route 53...");
+            var changes = new List<Change>();
+            foreach (var configTargetRecord in config.TargetRecords)
+            {
+                var recordSet = new ResourceRecordSet(configTargetRecord.Name, configTargetRecord.Type);
+                recordSet.ResourceRecords.Add(new ResourceRecord(externalIp));
+                recordSet.TTL = 60;
+                changes.Add(new Change(ChangeAction.UPSERT, recordSet));
+            }
+
+            var awsChangeRequest = new ChangeResourceRecordSetsRequest(awsTargetHostedZone.Id, new ChangeBatch(changes));
+            await awsRoute53Client.ChangeResourceRecordSetsAsync(awsChangeRequest);
+            lastExternalIp = externalIp;
+            Console.WriteLine("Sent!");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(ex);
     }
 
-    var awsChangeRequest = new ChangeResourceRecordSetsRequest(awsTargetHostedZone.Id, new ChangeBatch(changes));
-    var awsChangeResponse = await awsRoute53Client.ChangeResourceRecordSetsAsync(awsChangeRequest);
-
-    Console.WriteLine($"Sent! Status {awsChangeResponse.ChangeInfo.Status}");
     await Task.Delay(config.Interval * 1000);
 }
 
