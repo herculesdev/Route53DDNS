@@ -90,6 +90,10 @@ while (true)
             lastExternalIp = externalIp;
             Console.WriteLine("Sent!");
         }
+        else
+        {
+            Console.WriteLine("IP didn't change!");
+        }
     }
     catch (Exception ex)
     {
