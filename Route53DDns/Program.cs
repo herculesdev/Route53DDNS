@@ -1,113 +1,96 @@
-﻿// See https://aka.ms/new-console-template for more information
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Text.Json;
-using System.Threading.Tasks;
+﻿using System.Text.Json;
 using Amazon;
 using Amazon.Route53;
-using Amazon.Route53.Model;
 using Amazon.Runtime;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Polly;
+using Polly.Extensions.Http;
 using Route53DDns;
 
-Console.Write("Initializing...");
-var config = JsonSerializer.Deserialize<Config>(File.ReadAllText("config.json"), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-if(config is null)
+var serviceCollection = new ServiceCollection();
+ConfigureServices(serviceCollection);
+
+var serviceProvider = serviceCollection.BuildServiceProvider();
+var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
+
+var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) =>
 {
-    Console.WriteLine("Failed. Config not found");
-    return;
+    e.Cancel = true;
+    logger.LogInformation("Cancelamento recebido. Encerrando de forma graciosa...");
+    cts.Cancel();
+};
+
+try
+{
+    var updater = serviceProvider.GetRequiredService<DnsUpdater>();
+    await updater.RunAsync(cts.Token);
 }
-
-HostedZone? awsTargetHostedZone = null;
-
-using var awsRoute53Client = new AmazonRoute53Client(new BasicAWSCredentials(config.AccessKey, config.SecretKey), RegionEndpoint.USEast1);
-Console.WriteLine("OK!");
-
-Console.Write("Retrieving hosted zones...");
-var awsHostedZonesResponse = await awsRoute53Client.ListHostedZonesAsync();
-Console.WriteLine("OK!");
-
-foreach (var awsHostedZone in awsHostedZonesResponse.HostedZones)
+catch (OperationCanceledException)
 {
-    if (config.TargetHostedZone+"." == awsHostedZone.Name)
-        awsTargetHostedZone = awsHostedZone;
-    
-    Console.WriteLine(awsHostedZone.Name);
+    logger.LogInformation("Execução encerrada pelo usuário.");
 }
-
-if (awsTargetHostedZone is null)
+catch (Exception ex)
 {
-    Console.WriteLine($"Target hosted zone {config.TargetHostedZone} not found. Exiting...");
-    return;
-}
-
-Console.Write("Target hosted zone found. Retrieving records...");
-var awsRecordResponse = await awsRoute53Client.ListResourceRecordSetsAsync(new ListResourceRecordSetsRequest(awsTargetHostedZone.Id));
-Console.WriteLine("OK!");
-var maxNameLength = awsRecordResponse.ResourceRecordSets.Max(x => x.Name.Length);
-foreach (var awsHostedZoneRecord in awsRecordResponse.ResourceRecordSets)
-{
-    if (awsHostedZoneRecord.ResourceRecords.Count > 1)
-    {
-        Console.WriteLine($"{awsHostedZoneRecord.Type,5} | {awsHostedZoneRecord.Name.PadRight(maxNameLength, ' ')}");
-        awsHostedZoneRecord.ResourceRecords.ForEach(r => Console.WriteLine($"         ->{r.Value}"));
-    }
-    else
-    {
-        var awsHostedZoneRecordValue = awsHostedZoneRecord.ResourceRecords.FirstOrDefault();
-        Console.WriteLine($"{awsHostedZoneRecord.Type,5} | {awsHostedZoneRecord.Name.PadRight(maxNameLength, ' ')} -> {awsHostedZoneRecordValue?.Value}");
-    }
-
-}
-
-var lastExternalIp = "";
-
-while (true)
-{
-    try
-    {
-        Console.Write("Retrieving external IP...");
-        var externalIp = await GetExternalIp();
-        Console.WriteLine($"[{externalIp}] OK!");
-
-        if (externalIp != lastExternalIp)
-        {
-
-            Console.Write("Sending change request to AWS Route 53...");
-            var changes = new List<Change>();
-            foreach (var configTargetRecord in config.TargetRecords)
-            {
-                var recordSet = new ResourceRecordSet(configTargetRecord.Name, configTargetRecord.Type);
-                recordSet.ResourceRecords.Add(new ResourceRecord(externalIp));
-                recordSet.TTL = 60;
-                changes.Add(new Change(ChangeAction.UPSERT, recordSet));
-            }
-
-            var awsChangeRequest = new ChangeResourceRecordSetsRequest(awsTargetHostedZone.Id, new ChangeBatch(changes));
-            await awsRoute53Client.ChangeResourceRecordSetsAsync(awsChangeRequest);
-            lastExternalIp = externalIp;
-            Console.WriteLine("Sent!");
-        }
-        else
-        {
-            Console.WriteLine("IP didn't change!");
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine(ex);
-    }
-
-    await Task.Delay(config.Interval * 1000);
+    logger.LogCritical(ex, "Erro fatal durante a execução.");
 }
 
 return;
 
-
-async Task<string> GetExternalIp()
+void ConfigureServices(IServiceCollection services)
 {
-    using var client = new HttpClient();
-    return await client.GetStringAsync("https://api.ipify.org/");
+    services.AddLogging(builder =>
+    {
+        builder.AddSimpleConsole(options =>
+        {
+            options.TimestampFormat = "[yyyy-MM-dd HH:mm:ss] ";
+            options.SingleLine = true;
+            options.IncludeScopes = true;
+        });
+        
+        builder.SetMinimumLevel(LogLevel.Information);
+        builder.AddFilter("System.Net.Http.HttpClient.IExternalIpService.ClientHandler", LogLevel.Warning);
+        builder.AddFilter("System.Net.Http.HttpClient.IExternalIpService.LogicalHandler", LogLevel.Warning);
+    });
+
+    var configPath = "config.json";
+    Config? config = null;
+    if (File.Exists(configPath))
+        try
+        {
+            config = JsonSerializer.Deserialize<Config>(File.ReadAllText(configPath),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Erro ao ler config.json: {ex.Message}");
+        }
+
+    // Fallback if config is null
+    config ??= new Config(null, null, null, null, 60);
+
+    // Priority: Environment Variables > config.json (for credentials)
+    var accessKey = Environment.GetEnvironmentVariable("AWS_ACCESS_KEY_ID") ?? config.AccessKey;
+    var secretKey = Environment.GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY") ?? config.SecretKey;
+
+    var finalConfig = config with { AccessKey = accessKey, SecretKey = secretKey };
+    services.AddSingleton(finalConfig);
+
+    services.AddSingleton<IAmazonRoute53>(_ =>
+    {
+        if (!string.IsNullOrEmpty(accessKey) && !string.IsNullOrEmpty(secretKey))
+            return new AmazonRoute53Client(new BasicAWSCredentials(accessKey, secretKey), RegionEndpoint.USEast1);
+
+        // Use default chain if no explicit credentials
+        return new AmazonRoute53Client(RegionEndpoint.USEast1);
+    });
+
+    services.AddHttpClient<IExternalIpService, ExternalIpService>()
+        .AddPolicyHandler(HttpPolicyExtensions
+            .HandleTransientHttpError()
+            .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+
+    services.AddSingleton<IRoute53Service, Route53Service>();
+    services.AddSingleton<DnsUpdater>();
 }
