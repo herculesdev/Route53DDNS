@@ -1,0 +1,20 @@
+﻿services:
+  ddns-updater:
+    image: route53-ddns
+    build: .
+    container_name: ddns-updater
+    restart: unless-stopped
+    environment:
+      # Credenciais (Opcional se usar IAM Roles em ambientes AWS)
+      - AwsConfig__AccessKey=SUA_ACCESS_KEY
+      - AwsConfig__SecretKey=SUA_SECRET_KEY
+      
+      # Configurações da Zona e Registros
+      - AwsConfig__TargetHostedZone=exemplo.com
+      - AwsConfig__TargetRecords__0__Name=home.exemplo.com
+      - AwsConfig__TargetRecords__0__Type=A
+      #- AwsConfig__TargetRecords__1__Name=*.home.exemplo.com
+      #- AwsConfig__TargetRecords__1__Type=A
+      
+      # Intervalo de checagem em segundos
+      - AwsConfig__Interval=60
