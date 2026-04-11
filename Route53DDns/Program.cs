@@ -1,96 +1,51 @@
-﻿using System.Text.Json;
 using Amazon;
 using Amazon.Route53;
 using Amazon.Runtime;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Extensions.Http;
 using Route53DDns;
+using Route53DDns.Application;
+using Route53DDns.Configuration;
+using Route53DDns.Services;
 
-var serviceCollection = new ServiceCollection();
-ConfigureServices(serviceCollection);
+var builder = Host.CreateApplicationBuilder(args);
 
-var serviceProvider = serviceCollection.BuildServiceProvider();
-var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
+builder.Services.Configure<AwsConfig>(builder.Configuration.GetSection("AwsConfig"));
 
-var cts = new CancellationTokenSource();
-Console.CancelKeyPress += (_, e) =>
+builder.Services.AddLogging(logging =>
 {
-    e.Cancel = true;
-    logger.LogInformation("Cancelamento recebido. Encerrando de forma graciosa...");
-    cts.Cancel();
-};
-
-try
-{
-    var updater = serviceProvider.GetRequiredService<DnsUpdater>();
-    await updater.RunAsync(cts.Token);
-}
-catch (OperationCanceledException)
-{
-    logger.LogInformation("Execução encerrada pelo usuário.");
-}
-catch (Exception ex)
-{
-    logger.LogCritical(ex, "Erro fatal durante a execução.");
-}
-
-return;
-
-void ConfigureServices(IServiceCollection services)
-{
-    services.AddLogging(builder =>
+    logging.AddSimpleConsole(options =>
     {
-        builder.AddSimpleConsole(options =>
-        {
-            options.TimestampFormat = "[yyyy-MM-dd HH:mm:ss] ";
-            options.SingleLine = true;
-            options.IncludeScopes = true;
-        });
-        
-        builder.SetMinimumLevel(LogLevel.Information);
-        builder.AddFilter("System.Net.Http.HttpClient.IExternalIpService.ClientHandler", LogLevel.Warning);
-        builder.AddFilter("System.Net.Http.HttpClient.IExternalIpService.LogicalHandler", LogLevel.Warning);
+        options.TimestampFormat = "[yyyy-MM-dd HH:mm:ss] ";
+        options.SingleLine = true;
+        options.IncludeScopes = true;
     });
+    logging.AddFilter("System.Net.Http.HttpClient.IExternalIpService.ClientHandler", LogLevel.Warning);
+    logging.AddFilter("System.Net.Http.HttpClient.IExternalIpService.LogicalHandler", LogLevel.Warning);
+});
 
-    var configPath = "config.json";
-    Config? config = null;
-    if (File.Exists(configPath))
-        try
-        {
-            config = JsonSerializer.Deserialize<Config>(File.ReadAllText(configPath),
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Erro ao ler config.json: {ex.Message}");
-        }
+builder.Services.AddSingleton<IAmazonRoute53>(sp =>
+{
+    var config = sp.GetRequiredService<IOptions<AwsConfig>>().Value;
 
-    // Fallback if config is null
-    config ??= new Config(null, null, null, null, 60);
+    if (!string.IsNullOrEmpty(config.AccessKey) && !string.IsNullOrEmpty(config.SecretKey))
+        return new AmazonRoute53Client(new BasicAWSCredentials(config.AccessKey, config.SecretKey),
+            RegionEndpoint.USEast1);
 
-    // Priority: Environment Variables > config.json (for credentials)
-    var accessKey = Environment.GetEnvironmentVariable("AWS_ACCESS_KEY_ID") ?? config.AccessKey;
-    var secretKey = Environment.GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY") ?? config.SecretKey;
+    return new AmazonRoute53Client(RegionEndpoint.USEast1);
+});
 
-    var finalConfig = config with { AccessKey = accessKey, SecretKey = secretKey };
-    services.AddSingleton(finalConfig);
+builder.Services.AddHttpClient<IExternalIpService, ExternalIpService>()
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
-    services.AddSingleton<IAmazonRoute53>(_ =>
-    {
-        if (!string.IsNullOrEmpty(accessKey) && !string.IsNullOrEmpty(secretKey))
-            return new AmazonRoute53Client(new BasicAWSCredentials(accessKey, secretKey), RegionEndpoint.USEast1);
+builder.Services.AddSingleton<IRoute53Service, Route53Service>();
+builder.Services.AddHostedService<DnsUpdater>();
 
-        // Use default chain if no explicit credentials
-        return new AmazonRoute53Client(RegionEndpoint.USEast1);
-    });
-
-    services.AddHttpClient<IExternalIpService, ExternalIpService>()
-        .AddPolicyHandler(HttpPolicyExtensions
-            .HandleTransientHttpError()
-            .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
-
-    services.AddSingleton<IRoute53Service, Route53Service>();
-    services.AddSingleton<DnsUpdater>();
-}
+var host = builder.Build();
+await host.RunAsync();

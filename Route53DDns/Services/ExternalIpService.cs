@@ -1,7 +1,7 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
-namespace Route53DDns;
+namespace Route53DDns.Services;
 
 public interface IExternalIpService
 {
@@ -18,10 +18,9 @@ public class ExternalIpService(HttpClient httpClient, ILogger<ExternalIpService>
         {
             var response = await httpClient.GetStringAsync("https://api.ipify.org/", ct);
             var ip = response.Trim();
-
             if (!IpRegex.IsMatch(ip))
             {
-                logger.LogWarning("IP retornado pelo serviço é inválido: {Ip}", ip);
+                logger.LogWarning("IP returned by service is invalid: {Ip}", ip);
                 return null;
             }
 
@@ -29,7 +28,7 @@ public class ExternalIpService(HttpClient httpClient, ILogger<ExternalIpService>
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Erro ao obter IP externo.");
+            logger.LogError(ex, "Error getting external IP.");
             return null;
         }
     }

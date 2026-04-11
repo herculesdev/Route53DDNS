@@ -1,8 +1,9 @@
 ﻿using Amazon.Route53;
 using Amazon.Route53.Model;
 using Microsoft.Extensions.Logging;
+using Route53DDns.Configuration;
 
-namespace Route53DDns;
+namespace Route53DDns.Services;
 
 public interface IRoute53Service
 {
@@ -65,6 +66,6 @@ public class Route53Service(IAmazonRoute53 route53Client, ILogger<Route53Service
 
         var request = new ChangeResourceRecordSetsRequest(hostedZoneId, new ChangeBatch(changes));
         await route53Client.ChangeResourceRecordSetsAsync(request, ct);
-        logger.LogInformation("Solicitação de alteração enviada ao Route 53 para {Count} registros.", changes.Count);
+        logger.LogInformation("Change request sent to Route 53 for {Count} records.", changes.Count);
     }
 }

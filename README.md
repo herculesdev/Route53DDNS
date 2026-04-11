@@ -1,4 +1,4 @@
-# Route53DDNS
+﻿# Route53DDNS
 
 Um utilitário em .NET 8 para atualização dinâmica de registros do AWS Route 53 com o seu IP público atual, funcionando de forma similar a um serviço de DNS Dinâmico (DDNS).
 
@@ -13,7 +13,7 @@ A ferramenta monitora continuamente o IP externo da rede (via `api.ipify.org`) e
 ## 🛠️ Tecnologias Utilizadas
 
 - **Linguagem:** C# 12
-- **Framework:** .NET 8.0
+- **Framework:** .NET 8.0 (Worker Service)
 - **SDK AWS:** `AWSSDK.Route53`
 - **Resiliência:** `Polly` (para retentativas de chamadas HTTP)
 - **Testes:** xUnit e `NSubstitute` (Mocking)
@@ -21,51 +21,53 @@ A ferramenta monitora continuamente o IP externo da rede (via `api.ipify.org`) e
 
 ## ⚙️ Configuração
 
-O projeto pode ser configurado de duas formas principais: via arquivo `config.json` ou Variáveis de Ambiente.
+O projeto utiliza o sistema de configuração padrão do .NET (`appsettings.json`, Variáveis de Ambiente, etc).
 
-### 1. Arquivo `config.json`
+### 1. Arquivo `appsettings.json`
 
-Crie um arquivo chamado `config.json` no diretório raiz da aplicação:
+Crie um arquivo chamado `appsettings.json` no diretório raiz da aplicação:
 
 ```json
 {
-  "accessKey": "sua_aws_access_key",
-  "secretKey": "sua_aws_secret_key",
-  "targetHostedZone": "exemplo.com",
-  "targetRecords": [
-    {
-      "name": "home.exemplo.com",
-      "type": "A"
-    },
-    {
-      "name": "*.home.exemplo.com",
-      "type": "A"
-    }
-  ],
-  "interval": 60
+  "AwsConfig": {
+    "AccessKey": "sua_aws_access_key",
+    "SecretKey": "sua_aws_secret_key",
+    "TargetHostedZone": "exemplo.com",
+    "TargetRecords": [
+      {
+        "Name": "home.exemplo.com",
+        "Type": "A"
+      },
+      {
+        "Name": "*.home.exemplo.com",
+        "Type": "A"
+      }
+    ],
+    "Interval": 60
+  }
 }
 ```
 
-- `accessKey`/`secretKey`: Credenciais do IAM com permissão `route53:ChangeResourceRecordSets` e `route53:ListHostedZones`.
-- `targetHostedZone`: O nome da zona hospedada no Route 53.
-- `targetRecords`: Lista de registros que devem ser atualizados.
-- `interval`: Intervalo de checagem em segundos.
+- `AccessKey`/`SecretKey`: Credenciais do IAM (opcional se usar Variáveis de Ambiente).
+- `TargetHostedZone`: O nome da zona hospedada no Route 53.
+- `TargetRecords`: Lista de registros que devem ser atualizados.
+- `Interval`: Intervalo de checagem em segundos.
 
 ### 2. Variáveis de Ambiente
 
-As credenciais da AWS podem ser passadas via ambiente, o que é preferível para execução em containers:
+Você pode configurar qualquer valor via variáveis de ambiente seguindo o padrão do .NET (ex: `AwsConfig__AccessKey`). As credenciais padrão da AWS também são suportadas:
 
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 
-Se essas variáveis estiverem presentes, elas terão prioridade sobre o `config.json`.
+Se essas variáveis estiverem presentes, elas serão mapeadas para a configuração.
 
-## 📦 Como Buildar e Rodar
+## 🚀 Como Buildar e Rodar
 
 ### Execução Local (.NET SDK)
 
 1. Clone o repositório.
-2. Configure o `config.json`.
+2. Configure o `appsettings.json`.
 3. Restaure as dependências:
    ```bash
    dotnet restore
@@ -87,19 +89,11 @@ A aplicação possui um `Dockerfile` multi-estágio para otimização de imagem.
    ```bash
    docker build -t route53-ddns .
    ```
-2. Rodar o container (mapeando o config):
+2. Rodar o container:
    ```bash
    docker run -d \
-     -v ${PWD}/Route53DDns/config.json:/app/config.json \
+     -v ${PWD}/appsettings.json:/app/appsettings.json \
      --name ddns-updater \
-     route53-ddns
-   ```
-   *Ou passando credenciais via ambiente:*
-   ```bash
-   docker run -d \
-     -e AWS_ACCESS_KEY_ID=XXX \
-     -e AWS_SECRET_ACCESS_KEY=YYY \
-     -v ${PWD}/Route53DDns/config.json:/app/config.json \
      route53-ddns
    ```
 
@@ -112,9 +106,9 @@ Para rodar os testes:
 dotnet test
 ```
 
-## 🛡️ Segurança e Permissões
+## 🔐 Segurança e Permissões
 
-Recomenda-se criar um usuário IAM com permissões mínimas (Princípio do Menor Privilégio). Exemplo de política necessária:
+Recomenda-se criar um usuário IAM com permissões mínimas. Exemplo de política necessária:
 
 ```json
 {

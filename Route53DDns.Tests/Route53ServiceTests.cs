@@ -1,8 +1,10 @@
-﻿using Amazon.Route53;
+using Amazon.Route53;
 using Amazon.Route53.Model;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Route53DDns;
+using Route53DDns.Configuration;
+using Route53DDns.Services;
 using Xunit;
 
 namespace Route53DDns.Tests;
@@ -79,7 +81,7 @@ public class Route53ServiceTests
         // Arrange
         var hostedZoneId = "Z123";
         var ip = "1.2.3.4";
-        var targets = new[] { new TargetRecordConfig("A", "test.example.com") };
+        var targets = new[] { new TargetRecordConfig { Type = "A", Name = "test.example.com" } };
 
         // Act
         await _service.UpdateRecordsAsync(hostedZoneId, ip, targets, CancellationToken.None);

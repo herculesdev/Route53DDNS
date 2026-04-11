@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Route53DDns;
+using Route53DDns.Services;
 using Xunit;
 
 namespace Route53DDns.Tests;

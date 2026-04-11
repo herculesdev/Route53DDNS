@@ -1,8 +1,13 @@
-﻿using Amazon.Route53.Model;
+using Amazon.Route53.Model;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Route53DDns;
 using Xunit;
+using System.Reflection;
+using Route53DDns.Application;
+using Route53DDns.Configuration;
+using Route53DDns.Services;
 
 namespace Route53DDns.Tests;
 
@@ -10,19 +15,27 @@ public class DnsUpdaterTests
 {
     private readonly IExternalIpService _ipService = Substitute.For<IExternalIpService>();
     private readonly IRoute53Service _route53Service = Substitute.For<IRoute53Service>();
-    private readonly Config _config;
+    private readonly AwsConfig _awsConfig;
     private readonly DnsUpdater _updater;
 
     public DnsUpdaterTests()
     {
-        _config = new Config(
-            "access",
-            "secret",
-            "example.com",
-            [new TargetRecordConfig("A", "test.example.com")],
-            1 // 1 second interval for tests
-        );
-        _updater = new DnsUpdater(_ipService, _route53Service, _config, NullLogger<DnsUpdater>.Instance);
+        _awsConfig = new AwsConfig
+        {
+            AccessKey = "access",
+            SecretKey = "secret",
+            TargetHostedZone = "example.com",
+            TargetRecords = [new TargetRecordConfig { Type = "A", Name = "test.example.com" }],
+            Interval = 1
+        };
+        var options = Options.Create(_awsConfig);
+        _updater = new DnsUpdater(_ipService, _route53Service, options, NullLogger<DnsUpdater>.Instance);
+    }
+
+    private Task InvokeExecuteAsync(CancellationToken ct)
+    {
+        var method = typeof(DnsUpdater).GetMethod("ExecuteAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        return (Task)method!.Invoke(_updater, [ct])!;
     }
 
     [Fact]
@@ -34,7 +47,7 @@ public class DnsUpdaterTests
             .Returns((HostedZone?)null);
 
         // Act
-        await _updater.RunAsync(cts.Token);
+        await InvokeExecuteAsync(cts.Token);
 
         // Assert
         await _route53Service.DidNotReceive().ListRecordsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -53,7 +66,6 @@ public class DnsUpdaterTests
         _route53Service.ListRecordsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new List<ResourceRecordSet>());
 
-        // Mock getting the IP twice: first time a new IP, then cancel
         _ipService.GetExternalIpAsync(Arg.Any<CancellationToken>())
             .Returns(
                 x => initialIp,
@@ -63,17 +75,13 @@ public class DnsUpdaterTests
                 });
 
         // Act
-        try
-        {
-            await _updater.RunAsync(cts.Token);
-        }
-        catch (OperationCanceledException) { }
+        try { await InvokeExecuteAsync(cts.Token); } catch (OperationCanceledException) { }
 
         // Assert
         await _route53Service.Received(1).UpdateRecordsAsync(
             hostedZone.Id,
             initialIp,
-            _config.TargetRecords!,
+            _awsConfig.TargetRecords!,
             Arg.Any<CancellationToken>()
         );
     }
@@ -91,7 +99,6 @@ public class DnsUpdaterTests
         _route53Service.ListRecordsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new List<ResourceRecordSet>());
 
-        // Get same IP twice, then cancel
         _ipService.GetExternalIpAsync(Arg.Any<CancellationToken>())
             .Returns(
                 x => ip,
@@ -102,17 +109,9 @@ public class DnsUpdaterTests
                 });
 
         // Act
-        try
-        {
-            await _updater.RunAsync(cts.Token);
-        }
-        catch (OperationCanceledException) { }
+        try { await InvokeExecuteAsync(cts.Token); } catch (OperationCanceledException) { }
 
         // Assert
-        // Should only be called once for the first detection (if we consider _lastExternalIp is initially null)
-        // Actually, in DnsUpdater.cs: if (externalIp != _lastExternalIp) { ... _lastExternalIp = externalIp; }
-        // First call: initialIp ("1.2.3.4") != null -> UpdateRecordsAsync called, _lastExternalIp = "1.2.3.4"
-        // Second call: "1.2.3.4" != "1.2.3.4" is false -> UpdateRecordsAsync NOT called.
         await _route53Service.Received(1).UpdateRecordsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<TargetRecordConfig[]>(), Arg.Any<CancellationToken>());
     }
 }
